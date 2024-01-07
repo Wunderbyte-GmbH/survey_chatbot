@@ -1,3 +1,4 @@
+import asyncio
 from telegram_bot_handler import TelegramBotHandler
 from survey_data import SurveyData
 
@@ -8,4 +9,5 @@ class Application:
 
   def run(self):
       # Use TelegramBotHandler to run the application
-      self.telegram_bot_handler.run()
+      asyncio.run(self.telegram_bot_handler.run())
+

@@ -1,3 +1,13 @@
+import os
+from dotenv import load_dotenv
+import html
+from dataclasses import dataclass
+from http import HTTPStatus
+
+import uvicorn
+from asgiref.wsgi import WsgiToAsgi
+from flask import Flask, Response, abort, make_response, request
+
 from typing import Final
 from survey_data import SurveyData
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -8,22 +18,61 @@ from telegram.ext import (
     CallbackContext,
     ConversationHandler,
     CallbackQueryHandler,
+    ExtBot,
     MessageHandler,
     filters,
 )
 import logging
 
-GENDER, PHOTO, LOCATION, BIO = range(4)
-TOKEN: Final = "6410577113:AAGaS3vQaF4GjPssgyrJNYCBUgdPzSC6n28"
-BOT_USERNAME: Final = "@Oops_o_bot"
+# Load environment variables from the .env file
+load_dotenv()
+
+# Read constants from environment variables
+TOKEN: Final = os.getenv("TOKEN")
+BOT_USERNAME: Final = os.getenv("BOT_USERNAME")
+URL: Final = os.getenv("URL")
+PORT: Final = int(os.getenv("PORT", 8000))
+HOST: Final = os.getenv("HOST")
 
 # Define conversation states
 ASK_QUESTION = 0
 
+@dataclass
+class WebhookUpdate:
+    """Simple dataclass to wrap a custom update type"""
+
+    user_id: int
+    payload: str
+
+
+class CustomContext(CallbackContext[ExtBot, dict, dict, dict]):
+    """
+    Custom CallbackContext class that makes `user_data` available for updates of type
+    `WebhookUpdate`.
+    """
+
+    @classmethod
+    def from_update(
+        cls,
+        update: object,
+        application: "Application",
+    ) -> "CustomContext":
+        if isinstance(update, WebhookUpdate):
+            return cls(application=application, user_id=update.user_id)
+        return super().from_update(update, application)
+
+
 class TelegramBotHandler:
 
     def __init__(self, survey_data: SurveyData):
-        self.app = Application.builder().token(TOKEN).build()
+        """Set up PTB application and a web application for handling the incoming requests."""
+        context_types = ContextTypes(context=CustomContext)
+        # Here we set updater to None because we want our custom webhook server to handle the updates
+        # and hence we don't need an Updater instance
+        self.app = (
+            Application.builder().token(TOKEN).updater(None).context_types(context_types).build()
+        )
+        #self.app = Application.builder().token(TOKEN).build()
         self.survey_data = survey_data
         self.questions = self.survey_data.get_survey_dict()
 
@@ -37,10 +86,25 @@ class TelegramBotHandler:
         self.logger = logging.getLogger(__name__)
 
 
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(f'Help: Here is some info!')
+    async def help_command(self, update: Update, context: CustomContext)-> int:
+        """Display a message with instructions on how to use this bot."""
+        payload_url = html.escape(f"{URL}/submitpayload?user_id=<your user id>&payload=<payload>")
+        text = (
+            f"/help: Show help info\n"
+            f"/start: start the Survey Bot\n"
+            f"/cancel: Cancel the survey\n"
+        )
+        await update.message.reply_html(text=text)
 
-    async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def admin_help_command(self, update: Update, context: CustomContext)-> int:
+        """Display a message with instructions on how to use this bot."""
+        payload_url = html.escape(f"{URL}/submitpayload?user_id=<your user id>&payload=<payload>")
+        text = (
+            f"To check if the bot is still running, call <code>{URL}/healthcheck</code>.\n\n"
+        )
+        await update.message.reply_html(text=text)
+
+    async def cancel_command(self, update: Update, context: CustomContext) -> int:
         """Cancels and ends the conversation."""
         user = update.message.from_user
         self.logger.info("User %s canceled the survey.", user.first_name)
@@ -50,7 +114,7 @@ class TelegramBotHandler:
 
         return ConversationHandler.END
 
-    async def start_command(self, update: Update, context: CallbackContext) -> int:
+    async def start_command(self, update: Update, context: CustomContext) -> int:
         user = update.effective_user
         context.user_data['sid'] = self.survey_data.get_survey_id()
         await update.message.reply_text(f"Welcome {user.first_name}! Let's get started with the questions.")
@@ -60,12 +124,12 @@ class TelegramBotHandler:
 
         return await self.show_question(context, update)
 
-    async def stop_command(self, update: Update, context: CallbackContext) -> int:
+    async def stop_command(self, update: Update, context: CustomContext) -> int:
         """End Conversation by command."""
         await update.message.reply_text("Okay, bye.")
         return ConversationHandler.END
 
-    async def ask_question(self, update: Update, context: CallbackContext) -> int:
+    async def ask_question(self, update: Update, context: CustomContext) -> int:
         await self.show_answer(context, update)
 
         # Move to the next question
@@ -143,9 +207,9 @@ class TelegramBotHandler:
             return 'Hey there!'
         if 'how are you' in processed:
             return 'I am good!'
-        return 'I dont understand what you said'
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    async def handle_message(self, update: Update, context: CustomContext):
         message_type: str = update.message.chat.type
         text: str = update.message.text
 
@@ -164,24 +228,24 @@ class TelegramBotHandler:
     def error(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f'Update {update} caused error {context.error}')
 
-    def run(self):
+    async def run(self)-> None:
         print('Starting bot...')
 
-        # Add conversation handler with the states ASK_QUESTIONO
+        # Add conversation handler with the states ASK_QUESTION
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', self.start_command)],
             states={
                 ASK_QUESTION: [CallbackQueryHandler(self.ask_question, pattern=f"^,")],
             },
-            fallbacks=[CommandHandler("stop", self.stop_command),
-                        CommandHandler("cancel", self.cancel_command)],
+            fallbacks=[CommandHandler("stop", self.stop_command)],
         )
 
         self.app.add_handler(conv_handler)
 
         # Commands
-        #self.app.add_handler(CommandHandler("start", self.start_command))
+        self.app.add_handler(CommandHandler("cancel", self.cancel_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("h", self.admin_help_command))
 
         # Messages
         self.app.add_handler(MessageHandler(filters.TEXT, self.handle_message))
@@ -189,7 +253,39 @@ class TelegramBotHandler:
         # Errors
         self.app.add_error_handler(self.error)
 
+        # Pass webhook settings to telegram
+        await self.app.bot.set_webhook(url=f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
+
+        # Set up webserver
+        flask_app = Flask(__name__)
+
+        @flask_app.post("/telegram")  # type: ignore[misc]
+        async def telegram() -> Response:
+            """Handle incoming Telegram updates by putting them into the `update_queue`"""
+            await self.app.update_queue.put(Update.de_json(data=request.json, bot=self.app.bot))
+            return Response(status=HTTPStatus.OK)
+
+        @flask_app.get("/healthcheck")  # type: ignore[misc]
+        async def health() -> Response:
+            """For the health endpoint, reply with a simple plain text message."""
+            response = make_response("The bot is still running fine :)", HTTPStatus.OK)
+            response.mimetype = "text/plain"
+            return response
+
         # Poll the bot
         print('Polling...')
-        # Run the bot until the user presses Ctrl-C
-        self.app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+        webserver = uvicorn.Server(
+            config=uvicorn.Config(
+                app=WsgiToAsgi(flask_app),
+                port=PORT,
+                use_colors=False,
+                host="127.0.0.1",
+            )
+        )
+
+        # Run application and webserver together
+        async with self.app:
+            await self.app.start()
+            await webserver.serve()
+            await self.app.stop()
