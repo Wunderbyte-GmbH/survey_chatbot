@@ -5,14 +5,20 @@ from collections import OrderedDict
 import json
 import base64
 from datetime import datetime
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 class LimeSurveyHandler:
 
     def __init__(self):
-        self.headers = {"content-type": "application/json"} #, "connection": "Alive/json"
-        self.api_url = "https://opush.wunderbyte.at/index.php/admin/remotecontrol"
-        self.login = 'limooadmn'
-        self.password = '}IyAEzqHDmANDy@$LS{xFk9:OTHI[$<'
+        # Read values from environment variables
+        self.headers = json.loads(os.getenv("HEADERS", '{"content-type": "application/json"}'))
+        self.api_url = os.getenv("API_URL", "https://opush.wunderbyte.at/index.php/admin/remotecontrol")
+        self.login = os.getenv("LOGIN", "limooadmn")
+        self.password = os.getenv("PASSWORD", '}IyAEzqHDmANDy@$LS{xFk9:OTHI[$<')
         self.sess_key = None
 
     def query(self, method, params):
