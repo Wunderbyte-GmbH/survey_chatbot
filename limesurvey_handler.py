@@ -15,10 +15,10 @@ class LimeSurveyHandler:
 
     def __init__(self):
         # Read values from environment variables
-        self.headers = json.loads(os.getenv("HEADERS", '{"content-type": "application/json"}'))
-        self.api_url = os.getenv("API_URL", "https://opush.wunderbyte.at/index.php/admin/remotecontrol")
-        self.login = os.getenv("LOGIN", "limooadmn")
-        self.password = os.getenv("PASSWORD", '}IyAEzqHDmANDy@$LS{xFk9:OTHI[$<')
+        self.headers = json.loads(os.getenv("HEADERS"))
+        self.api_url = os.getenv("API_URL")
+        self.login = os.getenv("LOGIN")
+        self.password = os.getenv("PASSWORD")
         self.sess_key = None
 
     def query(self, method, params):
