@@ -65,7 +65,10 @@ class SurveyData:
 
     def save_survey_response(self, sid, response_data):
         # Filter response_data to only contain question ID and answer ID
-        filtered_response_data = {key: value for key, value in response_data.items() if key.startswith(str(sid))}
+        first_item_value = next(iter(response_data.values()))
+
+        filtered_response_data = {key: value for key, value in first_item_value.items() if key.startswith(str(sid))}
+
         result = self.limesurvey_handler.save_response(sid, filtered_response_data)
         print(result)
         return result
