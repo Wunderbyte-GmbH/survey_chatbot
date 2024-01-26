@@ -5,157 +5,59 @@ from collections import OrderedDict
 import json
 import base64
 from datetime import datetime
-from dotenv import load_dotenv
 import os
 
-# Load environment variables from .env file
-load_dotenv()
 
 class LimeSurveyHandler:
 
     def __init__(self):
-        # Read values from environment variables
-        self.headers = json.loads(os.getenv("HEADERS"))
-        self.api_url = os.getenv("API_URL")
-        self.login = os.getenv("LOGIN")
-        self.password = os.getenv("PASSWORD")
-        self.sess_key = None
-
-    def query(self, method, params):
-
-        data = OrderedDict([
-            ("method", method),
-            ("params", params),
-            ("id", 1)
-        ])
-
-        data = json.dumps(data)
-
-        try:
-            r = req.post(self.api_url, headers=self.headers, data=data)
-            return r.json()
-        except Exception as e:
-            print(f"Error querying {method}: {e}")
-            return []
-
-    def get_session_key(self):
-        method = "get_session_key"
-
-        params = OrderedDict([
-            ("username", self.login),
-            ("password", self.password)
-        ])
-        if self.sess_key is None:
-            self.sess_key = self.query(method, params)["result"]
-        return self.sess_key
+        self.query = Query()
 
     def list_surveys(self):
-        self.get_session_key()
-        method = "list_surveys"
-
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("sUsername", self.login)
-        ])
-
-        return self.query(method, params)["result"]
-
+        return self.query.execute_method("list_surveys", sUsername=self.query.login)
 
     def list_surveys_by_id(self, sid):
-        s=self.list_surveys()
         for survey in self.list_surveys():
             if survey["sid"] == sid:
                 return survey
 
     def list_groups(self, sid):
-        self.get_session_key()
-        method = "list_groups"
+        return self.query.execute_method("list_groups", iSurveyID=sid)
 
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("iSurveyID", sid)
-        ])
+    def list_questions(self, sid: int, gid: int):
+        return self.query.execute_method("list_questions", iSurveyID=sid, iGroupID=gid)
 
-        return self.query(method, params)["result"]
+    def list_survey_questions(self, sid: int):
+        return self.query.execute_method("list_questions", iSurveyID=sid)
 
+    def get_question_properties(self, qid: int):
+        return self.query.execute_method("get_question_properties", iQuestionID=qid,
+                                         aQuestionSettings=["answeroptions"])
 
-    def list_questions(self, sid, gid):
-        self.get_session_key()
-        method = "list_questions"
-
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("iSurveyID", sid),
-            ("iGroupID", gid)
-        ])
-
-        return self.query(method, params)["result"]
-
-
-    def list_survey_questions(self, sid):
-        self.get_session_key()
-        method = "list_questions"
-
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("iSurveyID", sid)
-        ])
-
-        return self.query(method, params)["result"]
-
-    def get_question_properties(self, sid, gid, qid):
-        self.get_session_key()
-        method = "get_question_properties"
-
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("iQuestionID", qid),
-            ("aQuestionSettings", ["answeroptions"])
-        ])
-
-        return self.query(method, params)["result"]
-
-    def add_response(self, sid, rdata):
-        self.get_session_key()
-        # Get the current date and time
+    @staticmethod
+    def _prepare_response_data(sid: int, additional_data: dict, seed="324567889"):
         now = datetime.now()
-        # Format the date and time
         formatted_date = now.strftime("%Y-%m-%d %H:%M:%S")
-
-        response_data = {
+        return {
             "iSurveyID": sid,
             "submitdate": formatted_date,
             "lastpage": 1,
             "startlanguage": "en",
-            "seed": "324567889", # Check this value later
+            "seed": seed,
+            **additional_data
         }
-        response_data.update(rdata)
 
-        method = "add_response"
+    def save_response(self, sid: int, rdata: dict):
+        response_data = self._prepare_response_data(sid, rdata)
+        return self.query.execute_method("add_response", iSurveyID=sid, aResponseData=response_data)
 
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("iSurveyID", sid),
-            ("aResponseData", response_data)
-        ])
+    def export_responses(self, sid: int):
+        result = self.query.execute_method("export_responses", iSurveyID=sid, sDocumentType="csv", sLanguageCode="en",
+                                           sCompletionStatus="full")
 
-        return self.query(method, params)["result"]
-
-    def export_responses(self, sid):
-        self.get_session_key()
-        method = "export_responses"
-
-        params = OrderedDict([
-            ("sSessionKey", self.sess_key),
-            ("iSurveyID", sid),
-            ("sDocumentType", "csv"),
-            ("sLanguageCode", "en"),
-            ("sCompletionStatus", "full")
-        ])
-
-        result = self.query(method, params)["result"]
         # Decode the base64 encoded string
-        if isinstance(result, dict) and 'status' in result and result['status'] == 'No Data, survey table does not exist.':
+        if (isinstance(result, dict) and 'status' in result and
+                result['status'] == 'No Data, survey table does not exist.'):
             print("No data available")
         else:
             base64_string = result
@@ -166,35 +68,74 @@ class LimeSurveyHandler:
             except binascii.Error:
                 print("Invalid base64 string")
 
-    def save_response(self, sid, response_data):
-        return self.add_response(sid, response_data)
-
-    def print_survey_questions(self,sid):
-        self.get_session_key()
-
-        # Iterate over all groups in each survey
-        survey=self.list_surveys_by_id(int(sid))
-        for group in self.list_groups(sid):
-            gid = group["gid"]
-            # Iterate over all questions in each group
-            for question in self.list_questions(sid, gid):
-                qid = question["qid"]
-                print(f'{sid}-{gid}-{qid}')
-                print(question)
-                options = self.get_question_properties(sid, gid, qid)
-                print(options)
-
     def print_questions_in_all_surveys(self):
-        self.get_session_key()
         # Iterate over all groups in each survey
         for survey in self.list_surveys():
             sid = survey["sid"]
+            self.print_survey_questions(sid)
+
+    def print_survey_questions(self, sid=None):
+        if sid is None:
+            for survey in self.list_surveys():
+                self.print_survey_questions(survey["sid"])
+        else:
             for group in self.list_groups(sid):
                 gid = group["gid"]
-                # Iterate over all questions in each group
                 for question in self.list_questions(sid, gid):
                     qid = question["qid"]
                     print(f'{sid}-{gid}-{qid}')
                     print(question)
-                    options = self.get_question_properties(sid, gid, qid)
+                    options = self.get_question_properties(qid)
                     print(options)
+
+
+class Query:
+    def __init__(self):
+        # Read values from environment variables
+        self.headers = json.loads(os.getenv("HEADERS"))
+        self.api_url = os.getenv("API_URL")
+        self.login = os.getenv("LOGIN")
+        self.password = os.getenv("PASSWORD")
+        self.sess_key = None
+        if self.headers is None:
+            raise ValueError("HEADERS environment variable is not set.")
+        if self.api_url is None:
+            raise ValueError("API_URL environment variable is not set.")
+        if self.login is None:
+            raise ValueError("LOGIN environment variable is not set.")
+        if self.password is None:
+            raise ValueError("PASSWORD environment variable is not set.")
+
+    @staticmethod
+    def create_request_payload(method: str, params: dict):
+        return OrderedDict([
+            ("method", method),
+            ("params", params),
+            ("id", 1)
+        ])
+
+    def query(self, method: str, params: dict):
+        data = json.dumps(self.create_request_payload(method, params))
+        try:
+            response = req.post(self.api_url, headers=self.headers, data=data)
+            return response.json()
+        except Exception as e:
+            print(f"Error querying {method}: {e}")
+            return []
+
+    def execute_method(self, method: str, **kwargs):
+        if self.sess_key is None:
+            self._get_session_key()
+        params = OrderedDict([
+            ("sSessionKey", self.sess_key),
+            *[(k, v) for k, v in kwargs.items()]
+        ])
+        return self.query(method, params)["result"]
+
+    def _get_session_key(self):
+        if self.sess_key is None:
+            params = OrderedDict([
+                ("username", self.login),
+                ("password", self.password)
+            ])
+            self.sess_key = self.query("get_session_key", params)["result"]

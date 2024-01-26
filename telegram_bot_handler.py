@@ -1,14 +1,10 @@
 import os
 import html
-from dotenv import load_dotenv
 from dataclasses import dataclass
-from http import HTTPStatus
-
-import uvicorn
-from asgiref.wsgi import WsgiToAsgi
-from flask import Flask, Response, make_response, request
 
 from typing import Final
+
+from flask_app import FlaskApp
 from survey_data import SurveyData
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -24,15 +20,21 @@ from telegram.ext import (
 )
 import logging
 
-""" Load environment variables from the .env file """
-load_dotenv()
+
+def get_env_value(key):
+    value = os.getenv(key)
+    if value is None:
+        raise ValueError(f"{key} environment variable is not set.")
+    return value
+
 
 """ Read constants from environment variables """
-TOKEN: Final = os.getenv("TOKEN")
-BOT_USERNAME: Final = os.getenv("BOT_USERNAME")
-URL: Final = os.getenv("URL")
-PORT: Final = int(os.getenv("PORT"))
-HOST: Final = os.getenv("HOST")
+TOKEN: Final = get_env_value("TOKEN")
+BOT_USERNAME: Final = get_env_value("BOT_USERNAME")
+URL: Final = get_env_value("URL")
+PORT: Final = int(get_env_value("PORT"))
+HOST: Final = get_env_value("HOST")
+SURVEY_ID: Final = int(get_env_value("SURVEY_ID"))
 
 """ Define conversation states """
 ASK_QUESTION = 0
@@ -71,17 +73,19 @@ class TelegramBotHandler:
         "twelve_a_day": {"seconds": 2 * 60 * 60, "text": "Twelve a day"},
         "once_a_month": {"seconds": 30 * 24 * 60 * 60, "text": "Once a month"},
         "every_2_seconds": {"seconds": 2, "text": "Every 2 seconds"},
+        "every_10_seconds": {"seconds": 10, "text": "Every 10 seconds"},
         # approximating a month to 30 days here; this would need adjusting for different month lengths
     }
 
-    def __init__(self, survey_data: SurveyData):
+    def __init__(self):
         """ Set up PTB application and a web application for handling the incoming requests. """
 
         context_types = ContextTypes(context=CustomContext)
+        # Read values from environment variables
         self.app = Application.builder().token(TOKEN).updater(None).context_types(context_types).build()
         self.job_queue = self.app.job_queue
-        self.survey_data = survey_data
-        self.questions = self.survey_data.get_survey_dict()
+        self.survey_data = SurveyData(int(SURVEY_ID))
+        self.questions = self.survey_data.question_list()
 
         """ Enable logging """
         logging.basicConfig(
@@ -106,9 +110,9 @@ class TelegramBotHandler:
     @staticmethod
     async def admin_help_command(update: Update, context: CustomContext):
         """ Display a message with instructions on how to use this bot. """
-        payload_url = html.escape(f"{URL}/submitpayload?user_id=<your user id>&payload=<payload>")
+        url = html.escape(f"{URL}/submitpayload?user_id=<your user id>&payload=<payload>")
         text = (
-            f"To check if the bot is still running, call <code>{URL}/healthcheck</code>.\n\n"
+            f"To check if the bot is still running, call <code>{url}/healthcheck</code>.\n\n"
         )
         await update.message.reply_html(text=text)
 
@@ -126,22 +130,26 @@ class TelegramBotHandler:
         await update.message.reply_text("Okay, bye.")
 
     async def start_command(self, update: Update, context: CustomContext):
-        user = update.effective_user
-        context.user_data['sid'] = self.survey_data.get_survey_id()
+        if 'survey_completed' not in context.user_data or not context.user_data['survey_completed']:
+            user = update.effective_user
+            self.__initiate_survey_for_user(context)
+            await self.__prepare_job_queue(context, update)
+            await update.message.reply_text(f"Welcome {user.first_name}! Let's get started with the questions.")
+
+    def __initiate_survey_for_user(self, context: CustomContext):
+        context.user_data['sid'] = self.survey_data.sid()
         if 'frequency' not in context.user_data:
             context.user_data['frequency'] = "every_2_seconds"
-        await update.message.reply_text(f"Welcome {user.first_name}! Let's get started with the questions.")
+        self.__reset_current_question(context)
 
-        """ sets dict at index to 0 """
-        context.user_data['current_question'] = 0
-        """ Sets up a job to ask question every x seconds."""
+    async def __prepare_job_queue(self, context: CustomContext, update: Update):
         chat_id = update.effective_message.chat_id
         interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
         context.user_data['send_confirmation'] = True
         context.job_queue.run_once(self.show_question, interval, chat_id=chat_id, name=str(chat_id))
 
     @staticmethod
-    def remove_job_if_exists(name: str, context: CustomContext) -> bool:
+    def __remove_job_if_exists(name: str, context: CustomContext) -> bool:
         """ Remove job with given name. Returns whether job was removed. """
         current_jobs = context.job_queue.get_jobs_by_name(name)
         if not current_jobs:
@@ -151,7 +159,7 @@ class TelegramBotHandler:
         return True
 
     @staticmethod
-    def build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
+    def __build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
         menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
         if header_buttons:
             menu.insert(0, header_buttons)
@@ -159,105 +167,110 @@ class TelegramBotHandler:
             menu.append(footer_buttons)
         return menu
 
+    @staticmethod
+    async def __send_message(context, chat_id, text, reply_markup=None):
+        await context.bot.send_message(chat_id, text=text, reply_markup=reply_markup)
+
     async def show_question(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        job = context.job
+        chat_id = context.job.chat_id
+        # print(f"---:'{context.job}'")
 
-        #print(f"---:'{context.job}'")
-
-        """ Show the question."""
-        current_question = self.app.user_data[job.chat_id]['current_question']
-        """ We presume that 'current_question', 'questions', etc. are set in job.context"""
+        current_question = self.app.user_data[chat_id]['current_question']
         if current_question < len(self.questions):
             question_data = self.questions[current_question]
-            question_text = f"{question_data['question']}"
-
-            if 'answeroptions' in question_data and isinstance(question_data['answeroptions'], dict):
-                buttons = [
-                    InlineKeyboardButton(answer_data['answer'], callback_data=f",{answer_key}")
-                    for answer_key, answer_data in question_data['answeroptions'].items()
-                ]
-                reply_markup = InlineKeyboardMarkup(self.build_menu(buttons, n_cols=1))
-
-                await context.bot.send_message(
-                    job.chat_id,
-                    text=question_text,
-                    reply_markup=reply_markup
-                )
-
-            else:
-                await context.bot.send_message(job.chat_id, text=question_text)
-
+            await self.__prepare_and_send_question(context, chat_id, question_data)
         else:
-            await context.bot.send_message(
-                job.chat_id, text="All questions have been asked. Thank you for your responses!"
-            )
-
-            sid = self.survey_data.get_survey_id()
+            self.app.user_data[chat_id]['survey_completed'] = True
+            await self.__send_message(context, chat_id,
+                                      "All questions have been asked. Thank you for your responses!")
+            sid = self.survey_data.sid()
             self.survey_data.save_survey_response(sid, self.app.user_data)
 
-    async def show_answer(self, update: Update, context: CustomContext) -> None:
+    async def __prepare_and_send_question(self, context, chat_id, question_data):
+        question_text = f"{question_data['question']}"
+        if 'answeroptions' in question_data and isinstance(question_data['answeroptions'], dict):
+            buttons = [InlineKeyboardButton(answer_data['answer'], callback_data=f",{answer_key}")
+                       for answer_key, answer_data in question_data['answeroptions'].items()]
+            reply_markup = InlineKeyboardMarkup(self.__build_menu(buttons, n_cols=1))
+            await self.__send_message(context, chat_id, question_text, reply_markup=reply_markup)
+        else:
+            await self.__send_message(context, chat_id, question_text)
+
+    @staticmethod
+    def __set_next_question(context):
+        """ Move to the next question"""
+        context.user_data['current_question'] += 1
+
+    @staticmethod
+    def __reset_current_question(context):
+        """ Reset the next question value"""
+        context.user_data['current_question'] = 0
+
+    @staticmethod
+    def __set_send_confirmation(context, send_confirmation: bool):
+        context.user_data['send_confirmation'] = send_confirmation
+
+    async def handle_user_answer(self, update: Update, context: CustomContext) -> None:
         query = update.callback_query
-        await query.answer()
-        user_answer = query.data.lstrip(',')
         chat_id = update.effective_message.chat_id
 
-        """ Save user answer if needed """
+        await self.__show_answer(context, query)
+
+        if context.user_data['send_confirmation']:
+            await self.send_confirmation(context, chat_id)
+        else:
+            self.__set_next_question(context)
+            self.__set_send_confirmation(context, True)
+            await self.__add_question_to_job_queue(chat_id, context)
+
+    async def __show_answer(self, context, query):
+        await query.answer()
+        user_answer = query.data.lstrip(',')
         question_data = self.questions[context.user_data['current_question']]
         question_code = question_data['code']
         question_text = f"{question_data['question']}"
+        answer_text = self.__get_answer_text(question_data, user_answer)
 
         """ Save user answer into bot.user_data """
         context.user_data[question_code] = user_answer
 
-        answer_text = self.get_answer_text(question_data, user_answer)
         await query.edit_message_text(
             f"Your answer to question: '{question_text}' was: {answer_text}")
-
         """ Print the answer to console """
         print(f"Your answer to question: '{question_text}' was {answer_text} ")
-        if context.user_data['send_confirmation']:
-            await self.send_confirmation(context, chat_id)
-        else:
-            context.user_data['send_confirmation'] = True
-            context.user_data['current_question'] += 1
-            self.remove_job_if_exists(str(chat_id), context)
-            interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
-            context.job_queue.run_once(self.show_question, interval, chat_id=chat_id, name=str(chat_id))
 
-    @staticmethod
-    async def send_confirmation(context: CallbackContext, chat_id: int):
-        """ Define the question and possible answers """
+    async def __add_question_to_job_queue(self, chat_id, context, interval=None):
+        self.__remove_job_if_exists(str(chat_id), context)
+        if interval is None:
+            interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
+        context.job_queue.run_once(self.show_question, interval, chat_id=chat_id, name=str(chat_id))
+
+    async def send_confirmation(self, context: CallbackContext, chat_id: int):
+        """ Send the confirmation question to user """
         question_text = "Are you sure about your answer?"
-        """ You can customize the inline keyboard buttons here """
         keyboard = [
             [InlineKeyboardButton("Yes", callback_data="_yes")],
             [InlineKeyboardButton("No", callback_data="_no")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        """ Send the question with inline keyboard to the user"""
-        await context.bot.send_message(chat_id=chat_id, text=question_text, reply_markup=reply_markup)
+        await self.__send_message(context, chat_id, question_text, reply_markup=reply_markup)
 
     async def confirmation_button_click(self, update: Update, context: CustomContext):
+        """ Handle users answer to the confirmation question"""
         query = update.callback_query
         selected_option = query.data
         chat_id = update.effective_message.chat_id
         await query.edit_message_text("...")
         if selected_option == "_yes":
-            """ Move to the next question"""
-            context.user_data['current_question'] += 1
-
-            self.remove_job_if_exists(str(chat_id), context)
-            interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
-            """ Create a job and send a question to the user"""
-            context.job_queue.run_once(self.show_question, interval, chat_id=chat_id)
-
+            self.__set_next_question(context)
+            await self.__add_question_to_job_queue(chat_id, context)
         else:
-            context.user_data['send_confirmation'] = False
-            context.job_queue.run_once(self.show_question, 0, chat_id=chat_id)
+            self.__set_send_confirmation(context, False)
+            await self.__add_question_to_job_queue(chat_id, context, 0)
 
     @staticmethod
-    def get_answer_text(question_data: dict, answer_key: str):
+    def __get_answer_text(question_data: dict, answer_key: str):
         for option_key, option_data in question_data['answeroptions'].items():
             if option_key == answer_key:
                 return option_data['answer']
@@ -291,43 +304,40 @@ class TelegramBotHandler:
     def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f'Update {update} caused error {context.error}')
 
-    @staticmethod
-    async def set_frequency_command(update: Update, context: CustomContext) -> int:
+    async def set_frequency_command(self, update: Update, context: CustomContext) -> int:
         """ Start the conversation to set the frequency. """
-        user = update.effective_user
-        await update.message.reply_text(f"Hello {user.first_name}! Let's set the frequency.")
+        if 'current_question' not in context.user_data or context.user_data['current_question'] >= len(self.questions):
+            keyboard = []
+            user = update.effective_user
+            await update.message.reply_text(f"Hello {user.first_name}! Let's set the frequency.")
 
-        """ You can customize the inline keyboard buttons here"""
-        keyboard = [
-            [InlineKeyboardButton("Once a day", callback_data="once_a_day")],
-            [InlineKeyboardButton("Twice a day", callback_data="twice_a_day")],
-            [InlineKeyboardButton("Twelfth a day", callback_data="twelve_a_day")],
-            [InlineKeyboardButton("Once a month", callback_data="once_a_month")],
-            [InlineKeyboardButton("Every 10 seconds", callback_data="every_10_seconds")],
-        ]
+            """ You can add the inline keyboard buttons here"""
+            for key, value in self.FREQUENCIES.items():
+                button_text = value["text"]
+                callback_data = key
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Select the frequency:", reply_markup=reply_markup)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("Select the frequency:", reply_markup=reply_markup)
+            return SET_FREQUENCY
 
-        return SET_FREQUENCY
+        return ConversationHandler.END
 
     async def handle_frequency_choice(self, update: Update, context: CustomContext) -> int:
         """ Handle the user's choice of frequency. """
-        query = update.callback_query
-        await query.answer()
+        if 'current_question' not in context.user_data or context.user_data['current_question'] >= len(self.questions):
+            query = update.callback_query
+            await query.answer()
 
-        selected_frequency = query.data
-        context.user_data['frequency'] = selected_frequency
+            selected_frequency = query.data
+            context.user_data['frequency'] = selected_frequency
 
-        text_to_show = self.FREQUENCIES[selected_frequency]["text"]
-        interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
+            text_to_show = self.FREQUENCIES[selected_frequency]["text"]
+            # interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
 
-        """ reply to the user"""
-        await query.edit_message_text(text=f"Frequency set to: {text_to_show}")
+            """ reply to the user"""
+            await query.edit_message_text(text=f"Frequency set to: {text_to_show}")
         return ConversationHandler.END
-
-    def get_frequency_text(self, freq):
-        return self.FREQUENCY_TEXTS.get(freq, "")
 
     async def run(self) -> None:
         print('Starting bot...')
@@ -342,53 +352,28 @@ class TelegramBotHandler:
                 fallbacks=[CommandHandler("cancel", self.cancel_command)],
             )
         )
-        """ Commands """
+        """ Register Commands """
         self.app.add_handler(CommandHandler("start", self.start_command))
         self.app.add_handler(CommandHandler("cancel", self.cancel_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("h", self.admin_help_command))
-        """ Register the callback query handler """
-        self.app.add_handler(CallbackQueryHandler(self.show_answer, pattern=f"^,"))
+        """ Register callback query handlers """
+        self.app.add_handler(CallbackQueryHandler(self.handle_user_answer, pattern=f"^,"))
         self.app.add_handler(CallbackQueryHandler(self.confirmation_button_click, pattern=f"^_yes|^_no"))
 
-        """ Messages """
-        self.app.add_handler(MessageHandler(filters.TEXT, self.handle_message))
+        """ Register Messages """
+        # self.app.add_handler(MessageHandler(filters.TEXT, self.handle_message))
 
-        """ Errors """
+        """ Register Errors """
         self.app.add_error_handler(self.error)
 
         """ Pass webhook settings to telegram """
         await self.app.bot.set_webhook(url=f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
-        """ Set up webserver """
-        flask_app = Flask(__name__)
-
-        @flask_app.post("/telegram")  # type: ignore[misc]
-        async def telegram() -> Response:
-            """Handle incoming Telegram updates by putting them into the `update_queue`"""
-            await self.app.update_queue.put(Update.de_json(data=request.json, bot=self.app.bot))
-            return Response(status=HTTPStatus.OK)
-
-        @flask_app.get("/healthcheck")  # type: ignore[misc]
-        async def health() -> Response:
-            """For the health endpoint, reply with a simple plain text message."""
-            response = make_response("The bot is still running fine :)", HTTPStatus.OK)
-            response.mimetype = "text/plain"
-            return response
-
-        print('Running...')
-
-        webserver = uvicorn.Server(
-            config=uvicorn.Config(
-                app=WsgiToAsgi(flask_app),
-                port=PORT,
-                use_colors=False,
-                host="127.0.0.1",
-            )
-        )
+        flask_app = FlaskApp(self.app)
 
         """ Run application and webserver together"""
         async with self.app:
             await self.app.start()
-            await webserver.serve()
+            await flask_app.run().serve()
             await self.app.stop()
