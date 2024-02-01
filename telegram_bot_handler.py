@@ -1,11 +1,15 @@
 import os
 import html
+import logging
+
+
+from bs4 import BeautifulSoup
 from dataclasses import dataclass
 
-from typing import Final
-
 from flask_app import FlaskApp
+from limesurvey_handler import LimeSurveyHandler
 from survey_data import SurveyData
+from config import Config
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -18,27 +22,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-import logging
-
-
-def get_env_value(key):
-    value = os.getenv(key)
-    if value is None:
-        raise ValueError(f"{key} environment variable is not set.")
-    return value
-
-
-""" Read constants from environment variables """
-TOKEN: Final = get_env_value("TOKEN")
-BOT_USERNAME: Final = get_env_value("BOT_USERNAME")
-URL: Final = get_env_value("URL")
-PORT: Final = int(get_env_value("PORT"))
-HOST: Final = get_env_value("HOST")
-SURVEY_ID: Final = int(get_env_value("SURVEY_ID"))
-
-""" Define conversation states """
-ASK_QUESTION = 0
-SET_FREQUENCY = 1
 
 
 @dataclass
@@ -67,24 +50,24 @@ class CustomContext(CallbackContext[ExtBot, dict, dict, dict]):
 
 
 class TelegramBotHandler:
-    FREQUENCIES = {
-        "once_a_day": {"seconds": 24 * 60 * 60, "text": "Once a day"},
-        "twice_a_day": {"seconds": 12 * 60 * 60, "text": "Twice a day"},
-        "twelve_a_day": {"seconds": 2 * 60 * 60, "text": "Twelve a day"},
-        "once_a_month": {"seconds": 30 * 24 * 60 * 60, "text": "Once a month"},
-        "every_2_seconds": {"seconds": 2, "text": "Every 2 seconds"},
-        "every_10_seconds": {"seconds": 10, "text": "Every 10 seconds"},
-        # approximating a month to 30 days here; this would need adjusting for different month lengths
-    }
 
-    def __init__(self):
+    def __init__(self, config: Config):
         """ Set up PTB application and a web application for handling the incoming requests. """
+
+        self.TOKEN = config.TOKEN
+        self.BOT_USERNAME = config.BOT_USERNAME
+        self.URL = config.URL
+        self.PORT = config.PORT
+        self.HOST = config.HOST
+        self.SURVEY_ID = config.SURVEY_ID
+        self.FREQUENCIES = config.FREQUENCIES
+        self.SET_FREQUENCY = config.SET_FREQUENCY
 
         context_types = ContextTypes(context=CustomContext)
         # Read values from environment variables
-        self.app = Application.builder().token(TOKEN).updater(None).context_types(context_types).build()
+        self.app = Application.builder().token(self.TOKEN).updater(None).context_types(context_types).build()
         self.job_queue = self.app.job_queue
-        self.survey_data = SurveyData(int(SURVEY_ID))
+        self.survey_data = SurveyData(int(self.SURVEY_ID), LimeSurveyHandler())
         self.questions = self.survey_data.question_list()
 
         """ Enable logging """
@@ -107,10 +90,9 @@ class TelegramBotHandler:
         )
         await update.message.reply_html(text=text)
 
-    @staticmethod
-    async def admin_help_command(update: Update, context: CustomContext):
+    async def admin_help_command(self, update: Update, context: CustomContext):
         """ Display a message with instructions on how to use this bot. """
-        url = html.escape(f"{URL}/submitpayload?user_id=<your user id>&payload=<payload>")
+        url = html.escape(f"{self.URL}/submitpayload?user_id=<your user id>&payload=<payload>")
         text = (
             f"To check if the bot is still running, call <code>{url}/healthcheck</code>.\n\n"
         )
@@ -169,7 +151,25 @@ class TelegramBotHandler:
 
     @staticmethod
     async def __send_message(context, chat_id, text, reply_markup=None):
-        await context.bot.send_message(chat_id, text=text, reply_markup=reply_markup)
+        img_urls, soup = await TelegramBotHandler.separate_text_and_image(text)
+        # Send each image
+        for url in img_urls:
+            await context.bot.send_photo(chat_id, photo=url)
+        # Send the text part
+        await context.bot.send_message(chat_id, text=str(soup), reply_markup=reply_markup)
+
+    @staticmethod
+    async def separate_text_and_image(text):
+        # Use BeautifulSoup to parse the text
+        soup = BeautifulSoup(text, 'html.parser')
+        # Find img tags
+        img_tags = soup.find_all('img')
+        # Extract the src URLs from the img tags
+        img_urls = [img['src'] for img in img_tags if 'src' in img.attrs]
+        # Remove img tags from the text
+        for img_tag in img_tags:
+            img_tag.extract()
+        return img_urls, soup
 
     async def show_question(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = context.job.chat_id
@@ -179,6 +179,7 @@ class TelegramBotHandler:
         if current_question < len(self.questions):
             question_data = self.questions[current_question]
             await self.__prepare_and_send_question(context, chat_id, question_data)
+            self.questions[current_question] = self.remove_images_from_question(question_data)
         else:
             self.app.user_data[chat_id]['survey_completed'] = True
             await self.__send_message(context, chat_id,
@@ -234,8 +235,10 @@ class TelegramBotHandler:
         """ Save user answer into bot.user_data """
         context.user_data[question_code] = user_answer
 
+        img_urls, soup = await TelegramBotHandler.separate_text_and_image(question_text)
+
         await query.edit_message_text(
-            f"Your answer to question: '{question_text}' was: {answer_text}")
+            f"Your answer to question: '{str(soup)}' was: {answer_text}")
         """ Print the answer to console """
         print(f"Your answer to question: '{question_text}' was {answer_text} ")
 
@@ -277,6 +280,20 @@ class TelegramBotHandler:
         return None  # Return None if the answer_key is not found
 
     @staticmethod
+    def remove_images_from_question(question_data: dict):
+        question = question_data.get('question', '')
+        soup = BeautifulSoup(question, 'html.parser')
+
+        # Remove all image tags
+        for img in soup.find_all('img'):
+            img.decompose()
+
+        # Update the question data
+        question_data['question'] = str(soup)
+
+        return question_data
+
+    @staticmethod
     def handle_response(text: str) -> str:
         processed: str = text.lower()
         if 'hello' in processed:
@@ -290,8 +307,8 @@ class TelegramBotHandler:
 
         print(f'User ({update.message.chat.id}) in {message_type}: "{text}"')
         if message_type == 'group':
-            if BOT_USERNAME in text:
-                new_text: str = text.replace(BOT_USERNAME, '')
+            if self.BOT_USERNAME in text:
+                new_text: str = text.replace(self.BOT_USERNAME, '')
                 response: str = self.handle_response(new_text)
             else:
                 return
@@ -319,7 +336,7 @@ class TelegramBotHandler:
 
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text("Select the frequency:", reply_markup=reply_markup)
-            return SET_FREQUENCY
+            return self.SET_FREQUENCY
 
         return ConversationHandler.END
 
@@ -333,7 +350,6 @@ class TelegramBotHandler:
             context.user_data['frequency'] = selected_frequency
 
             text_to_show = self.FREQUENCIES[selected_frequency]["text"]
-            # interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
 
             """ reply to the user"""
             await query.edit_message_text(text=f"Frequency set to: {text_to_show}")
@@ -347,7 +363,7 @@ class TelegramBotHandler:
             ConversationHandler(
                 entry_points=[CommandHandler('setfrequency', self.set_frequency_command)],
                 states={
-                    SET_FREQUENCY: [CallbackQueryHandler(self.handle_frequency_choice)],
+                    self.SET_FREQUENCY: [CallbackQueryHandler(self.handle_frequency_choice)],
                 },
                 fallbacks=[CommandHandler("cancel", self.cancel_command)],
             )
@@ -368,7 +384,7 @@ class TelegramBotHandler:
         self.app.add_error_handler(self.error)
 
         """ Pass webhook settings to telegram """
-        await self.app.bot.set_webhook(url=f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
+        await self.app.bot.set_webhook(url=f"{self.URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
         flask_app = FlaskApp(self.app)
 
