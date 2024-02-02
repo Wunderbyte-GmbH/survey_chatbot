@@ -17,12 +17,12 @@ class LimeSurveyHandler:
     def list_surveys(self):
         return self.query.execute_method("list_surveys", sUsername=self.query.LOGIN)
 
-    def list_surveys_by_id(self, sid):
+    def list_surveys_by_id(self, sid: int):
         for survey in self.list_surveys():
             if survey["sid"] == sid:
                 return survey
 
-    def list_groups(self, sid):
+    def list_groups(self, sid: int):
         return self.query.execute_method("list_groups", iSurveyID=sid)
 
     def list_questions(self, sid: int, gid: int):
@@ -131,4 +131,7 @@ class Query:
                 ("username", self.LOGIN),
                 ("password", self.PASSWORD)
             ])
-            self.sess_key = self.query("get_session_key", params)["result"]
+            response = self.query("get_session_key", params)
+            if 'status' in response:
+                raise RuntimeError(response['status'])
+            self.sess_key = response["result"]
