@@ -1,11 +1,8 @@
-import os
 import html
 import logging
 
-
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-
 from flask_app import FlaskApp
 from limesurvey_handler import LimeSurveyHandler
 from survey_data import SurveyData
@@ -22,6 +19,18 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+LOGGER = logging.getLogger(__name__)
+
+
+def prepare_logger():
+    """ Setup logger """
+    logging.basicConfig(
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    )
+
+    """ Set a higher logging level for httpx to avoid all GET and POST requests being logged """
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 @dataclass
@@ -64,20 +73,13 @@ class TelegramBotHandler:
         self.SET_FREQUENCY = config.SET_FREQUENCY
 
         context_types = ContextTypes(context=CustomContext)
-        # Read values from environment variables
+
         self.app = Application.builder().token(self.TOKEN).updater(None).context_types(context_types).build()
         self.job_queue = self.app.job_queue
-        self.survey_data = SurveyData(int(self.SURVEY_ID), LimeSurveyHandler())
+        self.survey_data = SurveyData(int(self.SURVEY_ID), LimeSurveyHandler(config))
         self.questions = self.survey_data.question_list()
 
-        """ Enable logging """
-        logging.basicConfig(
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-        )
-        """ Set a higher logging level for httpx to avoid all GET and POST requests being logged """
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-
-        self.logger = logging.getLogger(__name__)
+        prepare_logger()
 
     @staticmethod
     async def help_command(update: Update, context: CustomContext):
@@ -98,10 +100,11 @@ class TelegramBotHandler:
         )
         await update.message.reply_html(text=text)
 
-    async def cancel_command(self, update: Update, context: CustomContext):
+    @staticmethod
+    async def cancel_command(update: Update, context: CustomContext):
         """ Cancels and ends the conversation. """
         user = update.message.from_user
-        self.logger.info("User %s canceled the survey.", user.first_name)
+        LOGGER.info("User %s canceled the survey.", user.first_name)
         await update.message.reply_text(
             "Bye! I hope we can talk again some day."
         )
@@ -151,25 +154,12 @@ class TelegramBotHandler:
 
     @staticmethod
     async def __send_message(context, chat_id, text, reply_markup=None):
-        img_urls, soup = await TelegramBotHandler.separate_text_and_image(text)
+        img_urls, soup = await TextParser.separate_text_and_image(text)
         # Send each image
         for url in img_urls:
             await context.bot.send_photo(chat_id, photo=url)
         # Send the text part
         await context.bot.send_message(chat_id, text=str(soup), reply_markup=reply_markup)
-
-    @staticmethod
-    async def separate_text_and_image(text):
-        # Use BeautifulSoup to parse the text
-        soup = BeautifulSoup(text, 'html.parser')
-        # Find img tags
-        img_tags = soup.find_all('img')
-        # Extract the src URLs from the img tags
-        img_urls = [img['src'] for img in img_tags if 'src' in img.attrs]
-        # Remove img tags from the text
-        for img_tag in img_tags:
-            img_tag.extract()
-        return img_urls, soup
 
     async def show_question(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = context.job.chat_id
@@ -179,7 +169,7 @@ class TelegramBotHandler:
         if current_question < len(self.questions):
             question_data = self.questions[current_question]
             await self.__prepare_and_send_question(context, chat_id, question_data)
-            self.questions[current_question] = self.remove_images_from_question(question_data)
+            self.questions[current_question] = TextParser.remove_images_from_question(question_data)
         else:
             self.app.user_data[chat_id]['survey_completed'] = True
             await self.__send_message(context, chat_id,
@@ -230,12 +220,12 @@ class TelegramBotHandler:
         question_data = self.questions[context.user_data['current_question']]
         question_code = question_data['code']
         question_text = f"{question_data['question']}"
-        answer_text = self.__get_answer_text(question_data, user_answer)
+        answer_text = TextParser.get_answer_text(question_data, user_answer)
 
         """ Save user answer into bot.user_data """
         context.user_data[question_code] = user_answer
 
-        img_urls, soup = await TelegramBotHandler.separate_text_and_image(question_text)
+        img_urls, soup = await TextParser.separate_text_and_image(question_text)
 
         await query.edit_message_text(
             f"Your answer to question: '{str(soup)}' was: {answer_text}")
@@ -271,27 +261,6 @@ class TelegramBotHandler:
         else:
             self.__set_send_confirmation(context, False)
             await self.__add_question_to_job_queue(chat_id, context, 0)
-
-    @staticmethod
-    def __get_answer_text(question_data: dict, answer_key: str):
-        for option_key, option_data in question_data['answeroptions'].items():
-            if option_key == answer_key:
-                return option_data['answer']
-        return None  # Return None if the answer_key is not found
-
-    @staticmethod
-    def remove_images_from_question(question_data: dict):
-        question = question_data.get('question', '')
-        soup = BeautifulSoup(question, 'html.parser')
-
-        # Remove all image tags
-        for img in soup.find_all('img'):
-            img.decompose()
-
-        # Update the question data
-        question_data['question'] = str(soup)
-
-        return question_data
 
     @staticmethod
     def handle_response(text: str) -> str:
@@ -393,3 +362,39 @@ class TelegramBotHandler:
             await self.app.start()
             await flask_app.run().serve()
             await self.app.stop()
+
+
+class TextParser:
+    @staticmethod
+    async def separate_text_and_image(text):
+        # Use BeautifulSoup to parse the text
+        soup = BeautifulSoup(text, 'html.parser')
+        # Find img tags
+        img_tags = soup.find_all('img')
+        # Extract the src URLs from the img tags
+        img_urls = [img['src'] for img in img_tags if 'src' in img.attrs]
+        # Remove img tags from the text
+        for img_tag in img_tags:
+            img_tag.extract()
+        return img_urls, soup
+
+    @staticmethod
+    def remove_images_from_question(question_data: dict):
+        question = question_data.get('question', '')
+        soup = BeautifulSoup(question, 'html.parser')
+
+        # Remove all image tags
+        for img in soup.find_all('img'):
+            img.decompose()
+
+        # Update the question data
+        question_data['question'] = str(soup)
+
+        return question_data
+
+    @staticmethod
+    def get_answer_text(question_data: dict, answer_key: str):
+        for option_key, option_data in question_data['answeroptions'].items():
+            if option_key == answer_key:
+                return option_data['answer']
+        return None  # Return None if the answer_key is not found

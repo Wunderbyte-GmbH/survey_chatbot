@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Final
 
@@ -6,6 +7,11 @@ class Config:
 
     def __init__(self):
         """ Read constants from environment variables """
+        self.HEADERS = json.loads(Config.get_env_value("HEADERS"))
+        self.API_URL = Config.get_env_value("API_URL")
+        self.LOGIN = Config.get_env_value("LOGIN")
+        self.PASSWORD = Config.get_env_value("PASSWORD")
+
         self.TOKEN: Final = Config.get_env_value("TOKEN")
         self.BOT_USERNAME: Final = Config.get_env_value("BOT_USERNAME")
         self.URL: Final = Config.get_env_value("URL")

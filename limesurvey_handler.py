@@ -5,16 +5,17 @@ from collections import OrderedDict
 import json
 import base64
 from datetime import datetime
-import os
+from config import Config
 
 
 class LimeSurveyHandler:
 
-    def __init__(self):
-        self.query = Query()
+    def __init__(self, config: Config):
+        self.config = config
+        self.query = Query(config)
 
     def list_surveys(self):
-        return self.query.execute_method("list_surveys", sUsername=self.query.login)
+        return self.query.execute_method("list_surveys", sUsername=self.query.LOGIN)
 
     def list_surveys_by_id(self, sid):
         for survey in self.list_surveys():
@@ -90,21 +91,13 @@ class LimeSurveyHandler:
 
 
 class Query:
-    def __init__(self):
-        # Read values from environment variables
-        self.headers = json.loads(os.getenv("HEADERS"))
-        self.api_url = os.getenv("API_URL")
-        self.login = os.getenv("LOGIN")
-        self.password = os.getenv("PASSWORD")
+    def __init__(self, config: Config):
+        self.config = config
+        self.HEADERS = config.HEADERS
+        self.API_URL = config.API_URL
+        self.LOGIN = config.LOGIN
+        self.PASSWORD = config.PASSWORD
         self.sess_key = None
-        if self.headers is None:
-            raise ValueError("HEADERS environment variable is not set.")
-        if self.api_url is None:
-            raise ValueError("API_URL environment variable is not set.")
-        if self.login is None:
-            raise ValueError("LOGIN environment variable is not set.")
-        if self.password is None:
-            raise ValueError("PASSWORD environment variable is not set.")
 
     @staticmethod
     def create_request_payload(method: str, params: dict):
@@ -117,7 +110,7 @@ class Query:
     def query(self, method: str, params: dict):
         data = json.dumps(self.create_request_payload(method, params))
         try:
-            response = req.post(self.api_url, headers=self.headers, data=data)
+            response = req.post(self.API_URL, headers=self.HEADERS, data=data)
             return response.json()
         except Exception as e:
             print(f"Error querying {method}: {e}")
@@ -135,7 +128,7 @@ class Query:
     def _get_session_key(self):
         if self.sess_key is None:
             params = OrderedDict([
-                ("username", self.login),
-                ("password", self.password)
+                ("username", self.LOGIN),
+                ("password", self.PASSWORD)
             ])
             self.sess_key = self.query("get_session_key", params)["result"]

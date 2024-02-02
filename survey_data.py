@@ -1,18 +1,14 @@
+import re
 from limesurvey_handler import LimeSurveyHandler
 from urllib.parse import urlparse
-import os
-import re
-from bs4 import BeautifulSoup
+
 
 class SurveyData:
 
     def __init__(self, sid: int, limesurvey_handler: LimeSurveyHandler):
         self.__survey_id = sid
         self.__limesurvey_handler = limesurvey_handler
-        api_url = os.getenv("API_URL")
-        if api_url is None:
-            raise ValueError("API_URL environment variable is not set.")
-        self.__base_url = self.extract_base_url(api_url)
+        self.__base_url = self.extract_base_url(limesurvey_handler.config.API_URL)
         self.__survey_questions = self.__build_questions(self.__survey_id)
 
     def sid(self):
