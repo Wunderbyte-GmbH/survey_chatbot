@@ -35,7 +35,7 @@ class SurveyData:
         code = self.__construct_question_code(sid, gid, qid)
         options = self.__limesurvey_handler.get_question_properties(qid)
         answer_options = options.get('answeroptions', {})
-        question['question'] = self.refine_html_text(question['question'])
+        question['question'] = HTMLCleaner.refine_html_text(question['question'])
         question_dict = {
             'id': qid,
             'code': code,
@@ -71,19 +71,24 @@ class SurveyData:
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         return base_url
 
-    def refine_html_text(self, text: str):
-        new_text = SurveyData.replace_br_src(text)
-        new_html = self.replace_img_src(new_text)
 
-        return new_html
-
-    def replace_img_src(self, html_string: str):
-        img_src_pattern = r'src="(/upload/surveys/\d+/images/[^"]+)"'
-        img_src_replacement = f'src="{self.__base_url}\\1"'
-        new_html = re.sub(img_src_pattern, img_src_replacement, html_string)
-        return new_html
+class HTMLCleaner:
+    @staticmethod
+    def refine_html_text(text: str):
+        text = HTMLCleaner.replace_br_src(text)
+        text = HTMLCleaner.replace_paragraph_tags(text)
+        return text
 
     @staticmethod
     def replace_br_src(html_string: str):
-        new_html = html_string.replace("<br />", "\n")
-        return new_html
+        return html_string.replace("<br />", "\n")
+
+    @staticmethod
+    def replace_img_src(base_url: str, html_string: str):
+        img_src_pattern = r'src="(/upload/surveys/\d+/images/[^"]+)"'
+        img_src_replacement = f'src="{base_url}\\1"'
+        return re.sub(img_src_pattern, img_src_replacement, html_string)
+
+    @staticmethod
+    def replace_paragraph_tags(html_string: str):
+        return html_string.replace("<p>", "\n").replace("</p>", "\n")
