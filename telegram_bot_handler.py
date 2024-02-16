@@ -16,9 +16,11 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler,
     ExtBot,
-    MessageHandler,
-    filters,
 )
+
+# import your messages dictionaries
+from messages_en import MESSAGES as MESSAGES_EN
+from messages_de import MESSAGES as MESSAGES_DE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,8 +63,15 @@ class CustomContext(CallbackContext[ExtBot, dict, dict, dict]):
 class TelegramBotHandler:
 
     def __init__(self, config: Config):
-        """ Set up PTB application and a web application for handling the incoming requests. """
+        """  set messages to correct dictionary based on language. """
+        if config.LANG.lower() == "en":
+            self.lang_messages = MESSAGES_EN
+        elif config.LANG.lower() == "de":
+            self.lang_messages = MESSAGES_DE
+        else:
+            raise ValueError("Language not supported" + config.LANG)
 
+        """ Set up PTB application and a web application for handling the incoming requests. """
         self.TOKEN = config.TOKEN
         self.BOT_USERNAME = config.BOT_USERNAME
         self.URL = config.URL
@@ -81,45 +90,35 @@ class TelegramBotHandler:
 
         prepare_logger()
 
-    @staticmethod
-    async def help_command(update: Update, context: CustomContext):
+    async def help_command(self, update: Update, context: CustomContext):
         """ Display a message with instructions on how to use this bot. """
-        text = (
-            f"/help: Show help info\n"
-            f"/start: Start the Survey Bot\n"
-            f"/setfrequency: Set frequency\n"
-            f"/cancel: Cancel the survey\n"
-        )
+        text = self.lang_messages["help_info"]
         await update.message.reply_html(text=text)
 
     async def admin_help_command(self, update: Update, context: CustomContext):
         """ Display a message with instructions on how to use this bot. """
         url = html.escape(f"{self.URL}/submitpayload?user_id=<your user id>&payload=<payload>")
         text = (
-            f"To check if the bot is still running, call <code>{url}/healthcheck</code>.\n\n"
+            self.lang_messages["admin_help_info"].format(url=url)
         )
         await update.message.reply_html(text=text)
 
-    @staticmethod
-    async def cancel_command(update: Update, context: CustomContext):
+    async def cancel_command(self, update: Update, context: CustomContext):
         """ Cancels and ends the conversation. """
         user = update.message.from_user
         LOGGER.info("User %s canceled the survey.", user.first_name)
-        await update.message.reply_text(
-            "Bye! I hope we can talk again some day."
-        )
+        await update.message.reply_text(self.lang_messages["cancel_msg"])
 
-    @staticmethod
-    async def stop_command(update: Update, context: CustomContext):
+    async def stop_command(self, update: Update, context: CustomContext):
         """End Conversation by command."""
-        await update.message.reply_text("Okay, bye.")
+        await update.message.reply_text(self.lang_messages["stop_msg"])
 
     async def start_command(self, update: Update, context: CustomContext):
         if 'survey_completed' not in context.user_data or not context.user_data['survey_completed']:
             user = update.effective_user
             self.__initiate_survey_for_user(context)
             await self.__prepare_job_queue(context, update)
-            await update.message.reply_text(f"Welcome {user.first_name}! Let's get started with the questions.")
+            await update.message.reply_text(self.lang_messages["admin_help_info"].format(user_name=user.first_name))
 
     def __initiate_survey_for_user(self, context: CustomContext):
         context.user_data['sid'] = self.survey_data.sid()
@@ -163,7 +162,6 @@ class TelegramBotHandler:
 
     async def show_question(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = context.job.chat_id
-        # print(f"---:'{context.job}'")
 
         current_question = self.app.user_data[chat_id]['current_question']
         if current_question < len(self.questions):
@@ -172,8 +170,7 @@ class TelegramBotHandler:
             self.questions[current_question] = TextParser.remove_images_from_question(question_data)
         else:
             self.app.user_data[chat_id]['survey_completed'] = True
-            await self.__send_message(context, chat_id,
-                                      "All questions have been asked. Thank you for your responses!")
+            await self.__send_message(context, chat_id, self.lang_messages["questions_complete_msg"])
             sid = self.survey_data.sid()
             self.survey_data.save_survey_response(sid, self.app.user_data)
 
@@ -227,8 +224,9 @@ class TelegramBotHandler:
 
         img_urls, soup = await TextParser.separate_text_and_image(question_text)
 
-        await query.edit_message_text(
-            f"Your answer to question: '{str(soup)}' was: {answer_text}")
+        confirmed_answer_text = self.lang_messages["answered_msg"].format(question=str(soup), answer=answer_text)
+        await query.edit_message_text(confirmed_answer_text)
+
         """ Print the answer to console """
         print(f"Your answer to question: '{question_text}' was {answer_text} ")
 
@@ -240,14 +238,13 @@ class TelegramBotHandler:
 
     async def send_confirmation(self, context: CallbackContext, chat_id: int):
         """ Send the confirmation question to user """
-        question_text = "Are you sure about your answer?"
         keyboard = [
-            [InlineKeyboardButton("Yes", callback_data="_yes")],
-            [InlineKeyboardButton("No", callback_data="_no")],
+            [InlineKeyboardButton(self.lang_messages["yes_msg"], callback_data="_yes")],
+            [InlineKeyboardButton(self.lang_messages["no_msg"], callback_data="_no")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await self.__send_message(context, chat_id, question_text, reply_markup=reply_markup)
+        await self.__send_message(context, chat_id, self.lang_messages["confirmation_msg"], reply_markup=reply_markup)
 
     async def confirmation_button_click(self, update: Update, context: CustomContext):
         """ Handle users answer to the confirmation question"""
@@ -263,30 +260,6 @@ class TelegramBotHandler:
             await self.__add_question_to_job_queue(chat_id, context, 0)
 
     @staticmethod
-    def handle_response(text: str) -> str:
-        processed: str = text.lower()
-        if 'hello' in processed:
-            return 'Hey there!'
-        if 'how are you' in processed:
-            return 'I am good!'
-
-    async def handle_message(self, update: Update, context: CustomContext):
-        message_type: str = update.message.chat.type
-        text: str = update.message.text
-
-        print(f'User ({update.message.chat.id}) in {message_type}: "{text}"')
-        if message_type == 'group':
-            if self.BOT_USERNAME in text:
-                new_text: str = text.replace(self.BOT_USERNAME, '')
-                response: str = self.handle_response(new_text)
-            else:
-                return
-        else:
-            response: str = self.handle_response(text)
-        print('Bot:', response)
-        await update.message.reply_text(response)
-
-    @staticmethod
     def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f'Update {update} caused error {context.error}')
 
@@ -295,7 +268,9 @@ class TelegramBotHandler:
         if 'current_question' not in context.user_data or context.user_data['current_question'] >= len(self.questions):
             keyboard = []
             user = update.effective_user
-            await update.message.reply_text(f"Hello {user.first_name}! Let's set the frequency.")
+            greet_and_set_frequency_text = self.lang_messages["greet_and_set_frequency"].format(
+                username=user.first_name)
+            await update.message.reply_text(greet_and_set_frequency_text)
 
             """ You can add the inline keyboard buttons here"""
             for key, value in self.FREQUENCIES.items():
@@ -304,7 +279,8 @@ class TelegramBotHandler:
                 keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text("Select the frequency:", reply_markup=reply_markup)
+            select_frequency_text = self.lang_messages["select_frequency"]
+            await update.message.reply_text(select_frequency_text, reply_markup=reply_markup)
             return self.SET_FREQUENCY
 
         return ConversationHandler.END
@@ -321,7 +297,9 @@ class TelegramBotHandler:
             text_to_show = self.FREQUENCIES[selected_frequency]["text"]
 
             """ reply to the user"""
-            await query.edit_message_text(text=f"Frequency set to: {text_to_show}")
+            frequency_set_confirmation_text = self.lang_messages["frequency_set_confirmation"].format(
+                frequency=text_to_show)
+            await query.edit_message_text(frequency_set_confirmation_text)
         return ConversationHandler.END
 
     async def run(self) -> None:
@@ -345,9 +323,6 @@ class TelegramBotHandler:
         """ Register callback query handlers """
         self.app.add_handler(CallbackQueryHandler(self.handle_user_answer, pattern=f"^,"))
         self.app.add_handler(CallbackQueryHandler(self.confirmation_button_click, pattern=f"^_yes|^_no"))
-
-        """ Register Messages """
-        # self.app.add_handler(MessageHandler(filters.TEXT, self.handle_message))
 
         """ Register Errors """
         self.app.add_error_handler(self.error)

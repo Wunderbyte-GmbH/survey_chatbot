@@ -30,6 +30,8 @@ class Config:
         """ Define conversation states """
         self.SET_FREQUENCY: Final = 1
 
+        self.LANG: Final = Config.get_env_value("LANG")
+
     @staticmethod
     def get_env_value(key):
         value = os.getenv(key)
