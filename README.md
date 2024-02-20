@@ -17,6 +17,15 @@ setfrequency- set frequency
 help - show help
 cancel - cancel survey
 ```
+- Install Apache and configure Reverse Proxy Configuration for survey_chatbot in your enabled site
+```
+     # Reverse Proxy Configuration for survey_chatbot
+     ProxyPass /surveybot http://127.0.0.1:8000
+     ProxyPassReverse /surveybot http://127.0.0.1:8000
+```
+```
+service apache2 restart
+```
 
 Note that the words "start", "setfrequency", "help" and "cancel" should not be changed, but the messages in front of them can be changed.
 
@@ -135,4 +144,4 @@ You can edit the text of messages that are sent to users using messages_en.py or
 Pay attention that the variable names and variable placeholders in the middle of the text untouched.
 
 ## Notes
-
+The bash commands outlined in this README are tailored for Ubuntu. If you're using a different operating system, please adjust the commands accordingly. 
