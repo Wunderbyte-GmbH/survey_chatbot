@@ -1,5 +1,6 @@
 MESSAGES = {
-    "help_info": "/help: Hilfe anzeigen\n/start: Starte den Umfrage Bot\n/setfrequency: Frequenz festlegen\n/cancel: Umfrage abbrechen\n",
+    "help_info": "/help: Hilfe anzeigen\n/start: Starte den Umfrage Bot\n/setfrequency: Frequenz festlegen\n/cancel: "
+                 "Umfrage abbrechen\n",
     "admin_help_info": "Um zu überprüfen, ob der Bot noch läuft, rufen Sie <code>{url}/healthcheck</code> auf.\n\n",
     "cancel_msg": "Tschüss! Ich hoffe, wir können uns eines Tages wieder unterhalten.",
     "stop_msg": "Ok, Tschüss.",
@@ -12,4 +13,10 @@ MESSAGES = {
     "frequency_set_confirmation": "Frequenz eingestellt auf: {frequency}",
     "yes_msg": "Ja",
     "no_msg": "Nein",
+    "once_a_day": "Einmal täglich",
+    "twice_a_day": "Zweimal täglich",
+    "twelve_a_day": "Zwölfmal täglich",
+    "once_a_month": "Einmal monatlich",
+    "every_2_seconds": "Alle 2 Sekunden",
+    "every_10_seconds": "Alle 10 Sekunden",
 }

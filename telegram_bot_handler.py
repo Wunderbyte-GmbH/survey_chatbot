@@ -118,6 +118,7 @@ class TelegramBotHandler:
             user = update.effective_user
             self.__initiate_survey_for_user(context)
             await self.__prepare_job_queue(context, update)
+            LOGGER.info("User %s started the survey.", user.first_name)
             await update.message.reply_text(self.lang_messages["admin_help_info"].format(user_name=user.first_name))
 
     def __initiate_survey_for_user(self, context: CustomContext):
