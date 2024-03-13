@@ -158,8 +158,11 @@ class TelegramBotHandler:
         # Send each image
         for url in img_urls:
             await context.bot.send_photo(chat_id, photo=url)
-        # Send the text part
-        await context.bot.send_message(chat_id, text=str(soup), reply_markup=reply_markup)
+        try:
+            # Send the text part
+            await context.bot.send_message(chat_id, text=str(soup), reply_markup=reply_markup)
+        except Exception as err:
+            print(f"An error occurred in __send_message: {err}")
 
     async def show_question(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = context.job.chat_id
