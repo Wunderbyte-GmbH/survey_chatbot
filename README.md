@@ -39,6 +39,7 @@ git clone git@github.com:Wunderbyte-GmbH/survey_chatbot.git
 Install desired Python version(3.9 or higher) using pyenv, and set it as default python for survey_chatbot:
 ```
 pyenv install -v 3.12.0
+pyenv global 3.12.0
 cd /path/to/survey_chatbot
 pyenv local 3.12.0
 ```
