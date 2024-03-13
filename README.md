@@ -26,6 +26,7 @@ cancel - cancel survey
 ```
 ```
 sudo a2enmod proxy
+sudo a2enmod proxy_http
 service apache2 restart
 ```
 
