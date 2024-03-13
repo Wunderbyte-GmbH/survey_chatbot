@@ -18,6 +18,8 @@ setfrequency- set frequency
 help - show help
 cancel - cancel survey
 ```
+Note that the words "start", "setfrequency", "help" and "cancel" should not be changed, but the messages in front of them can be changed.
+
 - Install Apache and configure Reverse Proxy Configuration for survey_chatbot in your enabled site
 ```
      # Reverse Proxy Configuration for survey_chatbot
@@ -29,8 +31,8 @@ sudo a2enmod proxy
 sudo a2enmod proxy_http
 service apache2 restart
 ```
+IP ranges 149.154.160.0/20 and 91.108.4.0/22  are used by Telegram's servers for webhook requests. port 8000 should be open for these IP ranges.
 
-Note that the words "start", "setfrequency", "help" and "cancel" should not be changed, but the messages in front of them can be changed.
 
 ## Setting Up
 
