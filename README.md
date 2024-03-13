@@ -24,6 +24,7 @@ cancel - cancel survey
      ProxyPassReverse /surveybot http://127.0.0.1:8000
 ```
 ```
+sudo a2enmod proxy
 service apache2 restart
 ```
 
