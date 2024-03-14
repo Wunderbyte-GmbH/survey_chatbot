@@ -1,13 +1,13 @@
 # Survey Chatbot
 
 **Survey Chatbot** designed to interact with users via the Telegram messaging platform and integrate with LimeSurvey for survey functionality. 
-It retrieves questions from LimeSurvey using a specified survey ID, delivers these questions individually to users of the designated Telegram bot, and subsequently records responses back to LimeSurvey. Notably, users are restricted from submitting multiple responses to the survey. Furthermore, it is important that all questions defined in the survey are of the List (radio) type.
+It retrieves questions from LimeSurvey using a specified survey ID, delivers these questions individually to users of the designated Telegram bot, and subsequently records responses back to LimeSurvey. Submitting multiple responses to the survey by one user is configurable using MULTI_VOTE variable. 
 
 Refer to the instructions provided below for configuring and deploying the chatbot.
 ## Prerequisites
 
 - Install Python Version Management [pyenv](https://github.com/pyenv/pyenv)
-- Ensure that LimeSurvey is installed, and a survey has been created
+- Ensure that LimeSurvey is installed, and a survey has been created. All the questions defined in the survey must be of the **List (radio)** type.
 - Activate the LimeSurvey API: (global configuration->Interfaces, "Publish API on /admin/remotecontrol":On, "RPC interface enabled":JSON-RPC, "Set Access-Control-Allow-Origin header":On)
 - Create a telegram bot [@BotFather](https://telegram.me/BotFather) and ensure to store this token for future use
 - Add the required commands to your telegram bot
@@ -83,6 +83,7 @@ export LOGIN='your_limesurvey_admin_username'  # Using single quote is recommend
 export PASSWORD="your_limesurvey_admin_password"
 export SURVEY_ID="your_survey_id"
 export LANG="de"   # Can be "en" or "de"
+export MULTI_VOTE="True" #If MULTI_VOTE="False" users are restricted from submitting multiple responses to the survey
 ```
 You can also add the export commands in .bashrc, then you don't need to re-run them 
 
@@ -137,6 +138,7 @@ LOGIN="your_limesurvey_username"
 PASSWORD='your_limesurvey_password'
 SURVEY_ID="your_survey_id"
 LANG="de"
+MULTI_VOTE="True"
 ```
 
 4- Reload systemd daemon:

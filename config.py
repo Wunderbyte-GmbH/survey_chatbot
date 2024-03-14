@@ -20,6 +20,7 @@ class Config:
         self.PORT: Final = int(Config.get_env_value("PORT"))
         self.HOST: Final = Config.get_env_value("HOST")
         self.SURVEY_ID: Final = int(Config.get_env_value("SURVEY_ID"))
+        self.MULTI_VOTE: Final = Config.str_to_bool(Config.get_env_value("MULTI_VOTE"))
         self.LANG: Final = Config.get_env_value("LANG")
         if self.LANG.lower() == "en":
             lang_messages = MESSAGES_EN
@@ -45,3 +46,7 @@ class Config:
         if value is None:
             raise ValueError(f"{key} environment variable is not set.")
         return value
+
+    @staticmethod
+    def str_to_bool(value):
+        return value.lower() == "true"

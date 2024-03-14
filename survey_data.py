@@ -48,10 +48,10 @@ class SurveyData:
     def __construct_question_code(sid: int, gid: int, qid: int) -> str:
         return f'{sid}X{gid}X{qid}'
 
-    def save_survey_response(self, sid: int, response_data: dict) -> int:
+    def save_survey_response(self, sid: int, chat_id: int, response_data: dict) -> int:
         filtered_response_data = self.__filter_response_data(sid, response_data)
-
-        result = self.__limesurvey_handler.save_response(sid, filtered_response_data)
+        seed = self.get_last_nine_digits(chat_id)
+        result = self.__limesurvey_handler.save_response(sid, seed, filtered_response_data)
         print(result)
         return result
 
@@ -60,6 +60,12 @@ class SurveyData:
         """ Filter response_data to only contain question ID and answer ID"""
         first_item_value = next(iter(response_data.values()))
         return {key: value for key, value in first_item_value.items() if key.startswith(str(sid))}
+
+    @staticmethod
+    def get_last_nine_digits(chat_id: int):
+        str_chat_id = str(chat_id)
+        first_nine_chars = str_chat_id[-9:]
+        return first_nine_chars
 
     def print_survey_dict(self):
         """ Print method to display the survey_dict"""

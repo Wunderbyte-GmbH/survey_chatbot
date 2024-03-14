@@ -48,8 +48,8 @@ class LimeSurveyHandler:
             **additional_data
         }
 
-    def save_response(self, sid: int, rdata: dict):
-        response_data = self._prepare_response_data(sid, rdata)
+    def save_response(self, sid: int, seed: str, rdata: dict):
+        response_data = self._prepare_response_data(sid, rdata, seed)
         return self.query.execute_method("add_response", iSurveyID=sid, aResponseData=response_data)
 
     def export_responses(self, sid: int):

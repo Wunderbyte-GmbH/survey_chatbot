@@ -78,6 +78,7 @@ class TelegramBotHandler:
         self.PORT = config.PORT
         self.HOST = config.HOST
         self.SURVEY_ID = config.SURVEY_ID
+        self.MULTI_VOTE = config.MULTI_VOTE
         self.FREQUENCIES = config.FREQUENCIES
         self.SET_FREQUENCY = config.SET_FREQUENCY
 
@@ -114,12 +115,11 @@ class TelegramBotHandler:
         await update.message.reply_text(self.lang_messages["stop_msg"])
 
     async def start_command(self, update: Update, context: CustomContext):
-        if 'survey_completed' not in context.user_data or not context.user_data['survey_completed']:
+        if self.MULTI_VOTE or 'survey_completed' not in context.user_data or not context.user_data['survey_completed']:
             user = update.effective_user
             self.__initiate_survey_for_user(context)
             await self.__prepare_job_queue(context, update)
             LOGGER.info("User %s started the survey.", user.first_name)
-            await update.message.reply_text(self.lang_messages["admin_help_info"].format(user_name=user.first_name))
 
     def __initiate_survey_for_user(self, context: CustomContext):
         context.user_data['sid'] = self.survey_data.sid()
@@ -176,7 +176,7 @@ class TelegramBotHandler:
             self.app.user_data[chat_id]['survey_completed'] = True
             await self.__send_message(context, chat_id, self.lang_messages["questions_complete_msg"])
             sid = self.survey_data.sid()
-            self.survey_data.save_survey_response(sid, self.app.user_data)
+            self.survey_data.save_survey_response(sid, chat_id, self.app.user_data)
 
     async def __prepare_and_send_question(self, context, chat_id, question_data):
         question_text = f"{question_data['question']}"
