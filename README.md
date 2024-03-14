@@ -7,6 +7,7 @@ Refer to the instructions provided below for configuring and deploying the chatb
 ## Prerequisites
 
 - Install Python Version Management [pyenv](https://github.com/pyenv/pyenv)
+- Install python with a version of at least 3.10
 - Ensure that LimeSurvey is installed, and a survey has been created. All the questions defined in the survey must be of the **List (radio)** type.
 - Activate the LimeSurvey API: (global configuration->Interfaces, "Publish API on /admin/remotecontrol":On, "RPC interface enabled":JSON-RPC, "Set Access-Control-Allow-Origin header":On)
 - Create a telegram bot [@BotFather](https://telegram.me/BotFather) and ensure to store this token for future use
