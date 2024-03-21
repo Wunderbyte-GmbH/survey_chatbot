@@ -153,11 +153,13 @@ class TelegramBotHandler:
         return menu
 
     @staticmethod
-    async def __send_message(context, chat_id, text, reply_markup=None):
+    async def __send_message(context, chat_id, text, show_image=True, reply_markup=None):
         img_urls, soup = await TextParser.separate_text_and_image(text)
         # Send each image
-        for url in img_urls:
-            await context.bot.send_photo(chat_id, photo=url)
+        if show_image:
+            for url in img_urls:
+                print(f"Here is picture: '{chat_id}' was {url} ")
+                await context.bot.send_photo(chat_id, photo=url)
         try:
             # Send the text part
             await context.bot.send_message(chat_id, text=str(soup), reply_markup=reply_markup)
@@ -171,22 +173,34 @@ class TelegramBotHandler:
         if current_question < len(self.questions):
             question_data = self.questions[current_question]
             await self.__prepare_and_send_question(context, chat_id, question_data)
-            self.questions[current_question] = TextParser.remove_images_from_question(question_data)
         else:
             self.app.user_data[chat_id]['survey_completed'] = True
             await self.__send_message(context, chat_id, self.lang_messages["questions_complete_msg"])
             sid = self.survey_data.sid()
             self.survey_data.save_survey_response(sid, chat_id, self.app.user_data)
 
-    async def __prepare_and_send_question(self, context, chat_id, question_data):
+    async def show_question_no_image(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = context.job.chat_id
+
+        current_question = self.app.user_data[chat_id]['current_question']
+        if current_question < len(self.questions):
+            question_data = self.questions[current_question]
+            await self.__prepare_and_send_question(context, chat_id, question_data, False)
+        else:
+            self.app.user_data[chat_id]['survey_completed'] = True
+            await self.__send_message(context, chat_id, self.lang_messages["questions_complete_msg"])
+            sid = self.survey_data.sid()
+            self.survey_data.save_survey_response(sid, chat_id, self.app.user_data)
+
+    async def __prepare_and_send_question(self, context, chat_id, question_data, show_image=True):
         question_text = f"{question_data['question']}"
         if 'answeroptions' in question_data and isinstance(question_data['answeroptions'], dict):
             buttons = [InlineKeyboardButton(answer_data['answer'], callback_data=f",{answer_key}")
                        for answer_key, answer_data in question_data['answeroptions'].items()]
             reply_markup = InlineKeyboardMarkup(self.__build_menu(buttons, n_cols=1))
-            await self.__send_message(context, chat_id, question_text, reply_markup=reply_markup)
+            await self.__send_message(context, chat_id, question_text, show_image, reply_markup=reply_markup)
         else:
-            await self.__send_message(context, chat_id, question_text)
+            await self.__send_message(context, chat_id, question_text, show_image)
 
     @staticmethod
     def __set_next_question(context):
@@ -226,19 +240,20 @@ class TelegramBotHandler:
         """ Save user answer into bot.user_data """
         context.user_data[question_code] = user_answer
 
-        img_urls, soup = await TextParser.separate_text_and_image(question_text)
-
-        confirmed_answer_text = self.lang_messages["answered_msg"].format(question=str(soup), answer=answer_text)
+        confirmed_answer_text = self.lang_messages["answered_msg"].format(answer=answer_text)
         await query.edit_message_text(confirmed_answer_text)
 
         """ Print the answer to console """
-        print(f"Your answer to question: '{question_text}' was {answer_text} ")
+        print(f"Your answer was {answer_text} ")
 
-    async def __add_question_to_job_queue(self, chat_id, context, interval=None):
+    async def __add_question_to_job_queue(self, chat_id, context, interval=None, show_image=True):
         self.__remove_job_if_exists(str(chat_id), context)
         if interval is None:
             interval = self.FREQUENCIES[context.user_data['frequency']]["seconds"]
-        context.job_queue.run_once(self.show_question, interval, chat_id=chat_id, name=str(chat_id))
+        if show_image:
+            context.job_queue.run_once(self.show_question, interval, chat_id=chat_id, name=str(chat_id))
+        else:
+            context.job_queue.run_once(self.show_question_no_image, interval, chat_id=chat_id, name=str(chat_id))
 
     async def send_confirmation(self, context: CallbackContext, chat_id: int):
         """ Send the confirmation question to user """
@@ -261,7 +276,7 @@ class TelegramBotHandler:
             await self.__add_question_to_job_queue(chat_id, context)
         else:
             self.__set_send_confirmation(context, False)
-            await self.__add_question_to_job_queue(chat_id, context, 0)
+            await self.__add_question_to_job_queue(chat_id, context, 0, False)
 
     @staticmethod
     def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,20 +371,6 @@ class TextParser:
         for img_tag in img_tags:
             img_tag.extract()
         return img_urls, soup
-
-    @staticmethod
-    def remove_images_from_question(question_data: dict):
-        question = question_data.get('question', '')
-        soup = BeautifulSoup(question, 'html.parser')
-
-        # Remove all image tags
-        for img in soup.find_all('img'):
-            img.decompose()
-
-        # Update the question data
-        question_data['question'] = str(soup)
-
-        return question_data
 
     @staticmethod
     def get_answer_text(question_data: dict, answer_key: str):

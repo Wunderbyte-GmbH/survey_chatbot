@@ -6,7 +6,7 @@ MESSAGES = {
     "stop_msg": "Ok, Tschüss.",
     "welcome_msg": "Willkommen {user_name}! Lassen Sie uns mit den Fragen beginnen.",
     "questions_complete_msg": "Alle Fragen wurden gestellt. Vielen Dank für Ihre Antworten!",
-    "answered_msg": 'Ihre Antwort auf die Frage "{question}" war: {answer}',
+    "answered_msg": 'Ihre Antwort war: {answer}',
     "confirmation_msg": "Sind Sie sicher, dass Ihre Antwort korrekt ist?",
     "greet_and_set_frequency": "Hallo {username}! Lassen Sie uns die Frequenz festlegen.",
     "select_frequency": "Wählen Sie die Frequenz aus:",
