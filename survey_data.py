@@ -22,8 +22,8 @@ class SurveyData:
 
         for group in self.__limesurvey_handler.list_groups(sid):
             gid = group["gid"]
-
-            for question in self.__limesurvey_handler.list_questions(sid, gid):
+            question_list = self.__limesurvey_handler.list_questions(sid, gid)
+            for question in sorted(question_list, key=lambda question: question['question_order']):
                 question_dict = self.__create_question_item(sid, gid, question)
                 """ Append the question dictionary to the result list"""
                 result.append(question_dict)
@@ -36,11 +36,15 @@ class SurveyData:
         options = self.__limesurvey_handler.get_question_properties(qid)
         answer_options = options.get('answeroptions', {})
         question['question'] = self.__html_cleaner.refine_html_text(question['question'])
+        if isinstance(answer_options, dict):
+            answeroptions = {key: {'answer': value.get('answer')} for key, value in answer_options.items()}
+        else:
+            answeroptions = {}
         question_dict = {
             'id': qid,
             'code': code,
             'question': question['question'],
-            'answeroptions': {key: {'answer': answer_options[key].get('answer')} for key in answer_options}
+            'answeroptions': answeroptions
         }
         return question_dict
 

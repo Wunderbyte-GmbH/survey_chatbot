@@ -1,3 +1,4 @@
+import hashlib
 import html
 import logging
 
@@ -7,7 +8,11 @@ from flask_app import FlaskApp
 from limesurvey_handler import LimeSurveyHandler
 from survey_data import SurveyData
 from config import Config
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from buildAddressDataset import AddressDownloader
+from trie import Trie
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InlineQueryResultArticle, \
+    InputTextMessageContent
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -15,7 +20,7 @@ from telegram.ext import (
     CallbackContext,
     ConversationHandler,
     CallbackQueryHandler,
-    ExtBot,
+    ExtBot, InlineQueryHandler,
 )
 
 # import your messages dictionaries
@@ -88,7 +93,10 @@ class TelegramBotHandler:
         self.job_queue = self.app.job_queue
         self.survey_data = SurveyData(int(self.SURVEY_ID), LimeSurveyHandler(config))
         self.questions = self.survey_data.question_list()
-
+        self.address_downloader = AddressDownloader()
+        self.trie = Trie()
+        for address in self.address_downloader.get_addresses():
+            self.trie.insert(address)
         prepare_logger()
 
     async def help_command(self, update: Update, context: CustomContext):
@@ -145,6 +153,11 @@ class TelegramBotHandler:
 
     @staticmethod
     def __build_menu(buttons, n_cols, header_buttons=None, footer_buttons=None):
+        """
+        This method builds menu for InlineKeyboardMarkup.
+
+        :return: List of buttons
+        """
         menu = [buttons[i:i + n_cols] for i in range(0, len(buttons), n_cols)]
         if header_buttons:
             menu.insert(0, header_buttons)
@@ -193,23 +206,43 @@ class TelegramBotHandler:
             self.survey_data.save_survey_response(sid, chat_id, self.app.user_data)
 
     async def __prepare_and_send_question(self, context, chat_id, question_data, show_image=True):
+        """
+        This method prepare_and_send_question.
+
+        Any question that does not have answeroptions, is considered as a question about address which is and inline
+        query.
+
+        """
         question_text = f"{question_data['question']}"
-        if 'answeroptions' in question_data and isinstance(question_data['answeroptions'], dict):
+        if 'answeroptions' in question_data and isinstance(question_data['answeroptions'], dict) and question_data['answeroptions']:
             buttons = [InlineKeyboardButton(answer_data['answer'], callback_data=f",{answer_key}")
                        for answer_key, answer_data in question_data['answeroptions'].items()]
             reply_markup = InlineKeyboardMarkup(self.__build_menu(buttons, n_cols=1))
             await self.__send_message(context, chat_id, question_text, show_image, reply_markup=reply_markup)
         else:
-            await self.__send_message(context, chat_id, question_text, show_image)
+            """Send a message with a switch inline query button"""
+            button = InlineKeyboardButton(
+                self.lang_messages["search_msg"],
+                switch_inline_query_current_chat=""
+            )
+            reply_markup = InlineKeyboardMarkup([[button]])
+            question_text = f"{question_text}"
+            await self.__send_message(context, chat_id, question_text, show_image,reply_markup=reply_markup)
 
     @staticmethod
     def __set_next_question(context):
-        """ Move to the next question"""
+        """
+        This method sets context.user_data['current_question'] to move to the next question.
+
+        """
         context.user_data['current_question'] += 1
 
     @staticmethod
     def __reset_current_question(context):
-        """ Reset the next question value"""
+        """
+        This method resets the next question value.
+
+        """
         context.user_data['current_question'] = 0
 
     @staticmethod
@@ -218,7 +251,7 @@ class TelegramBotHandler:
 
     async def handle_user_answer(self, update: Update, context: CustomContext) -> None:
         query = update.callback_query
-        chat_id = update.effective_message.chat_id
+        chat_id = query.from_user.id
 
         await self.__show_answer(context, query)
 
@@ -277,6 +310,30 @@ class TelegramBotHandler:
         else:
             self.__set_send_confirmation(context, False)
             await self.__add_question_to_job_queue(chat_id, context, 0, False)
+
+    async def inline_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle the inline query. This is run when you type: @botusername <query>"""
+        query = update.inline_query.query
+        if not query:
+            return
+        # get a generator of autocompleted words
+        autocompleted = self.trie.autocomplete(query)
+        if autocompleted is not None:
+            ac = set(autocompleted)
+            # create InlineQueryResultArticle for each autocompleted address
+            results = sorted([
+                InlineQueryResultArticle(
+                    id=hashlib.md5(address.encode()).hexdigest(),
+                    title=address,
+                    input_message_content=InputTextMessageContent(address),
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton(self.lang_messages["select_msg"].format(address=address), callback_data=f",{address}")
+                    ]])
+                ) for address in ac
+            ], key=lambda x: x.id)
+
+            # respond with the results, limiting to the first 50
+            await context.bot.answer_inline_query(update.inline_query.id, results[:50])
 
     @staticmethod
     def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -343,6 +400,9 @@ class TelegramBotHandler:
         self.app.add_handler(CallbackQueryHandler(self.handle_user_answer, pattern=f"^,"))
         self.app.add_handler(CallbackQueryHandler(self.confirmation_button_click, pattern=f"^_yes|^_no"))
 
+        # on inline queries - show corresponding inline results
+        self.app.add_handler(InlineQueryHandler(self.inline_query))
+
         """ Register Errors """
         self.app.add_error_handler(self.error)
 
@@ -374,6 +434,10 @@ class TextParser:
 
     @staticmethod
     def get_answer_text(question_data: dict, answer_key: str):
+        # Check if 'answeroptions' is an empty dictionary
+        if not question_data.get('answeroptions'):
+            return answer_key
+
         for option_key, option_data in question_data['answeroptions'].items():
             if option_key == answer_key:
                 return option_data['answer']
