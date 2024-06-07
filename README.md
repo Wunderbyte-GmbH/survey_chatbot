@@ -9,6 +9,7 @@ Refer to the instructions provided below for configuring and deploying the chatb
 - Install Python Version Management [pyenv](https://github.com/pyenv/pyenv)
 - Install python with a version of at least 3.9
 - Ensure that LimeSurvey is installed, and a survey has been created. All the questions defined in the survey must be of the **List (radio)** type. Only if you like to have an ask for the address, you can have the type **Long free text**. 
+- Note that you must not change the questions' code or order, as it affects the connection with chatbot
 - Activate the LimeSurvey API: (global configuration->Interfaces, "Publish API on /admin/remotecontrol":On, "RPC interface enabled":JSON-RPC, "Set Access-Control-Allow-Origin header":On)
 - Create a telegram bot [@BotFather](https://telegram.me/BotFather) and ensure to store this token for future use
 - Enable inline mode for having searchable address for your chatbot. You can do it by talking to [@BotFather](https://telegram.me/BotFather)  using /setinline. Then it asks you for a description to which you must enter the word "Address". 
