@@ -1,7 +1,6 @@
 MESSAGES = {
     "help_info": "/help: Show help info\n/start: Start the Survey Bot\n/setfrequency: Set frequency\n/cancel: Cancel "
                  "the survey\n",
-    "admin_help_info": "To check if the bot is still running, call <code>{url}/healthcheck</code>.\n\n",
     "cancel_msg": "Bye! I hope we can talk again some day.",
     "stop_msg": "Okay, bye.",
     "welcome_msg": "Welcome {user_name}! Let's get started with the questions.",
@@ -19,4 +18,6 @@ MESSAGES = {
     "once_a_month": "Once a month",
     "every_2_seconds": "Every 2 seconds",
     "every_10_seconds": "Every 10 seconds",
+    "select_msg": "Approve {address}",
+    "search_msg": "Click here to search address by starting to type it",
 }

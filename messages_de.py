@@ -1,7 +1,6 @@
 MESSAGES = {
     "help_info": "/help: Hilfe anzeigen\n/start: Starte den Umfrage Bot\n/setfrequency: Frequenz festlegen\n/cancel: "
                  "Umfrage abbrechen\n",
-    "admin_help_info": "Um zu überprüfen, ob der Bot noch läuft, rufen Sie <code>{url}/healthcheck</code> auf.\n\n",
     "cancel_msg": "Tschüss! Ich hoffe, wir können uns eines Tages wieder unterhalten.",
     "stop_msg": "Ok, Tschüss.",
     "welcome_msg": "Willkommen {user_name}! Lassen Sie uns mit den Fragen beginnen.",
@@ -10,7 +9,7 @@ MESSAGES = {
     "confirmation_msg": "Sind Sie sicher, dass Ihre Antwort korrekt ist?",
     "greet_and_set_frequency": "Hallo {username}! Lassen Sie uns die Frequenz festlegen.",
     "select_frequency": "Wählen Sie die Frequenz aus:",
-    "frequency_set_confirmation": "Frequenz eingestellt auf: {frequency}",
+    "frequency_set_confirmation": "Frequeny eingestellt auf: {frequency}",
     "yes_msg": "Ja",
     "no_msg": "Nein",
     "once_a_day": "Einmal täglich",
@@ -19,4 +18,6 @@ MESSAGES = {
     "once_a_month": "Einmal monatlich",
     "every_2_seconds": "Alle 2 Sekunden",
     "every_10_seconds": "Alle 10 Sekunden",
+    "select_msg": "{address} genehmigen",
+    "search_msg": "Klicken Sie hier, um die Adresse durch Eintippen zu suchen",
 }
